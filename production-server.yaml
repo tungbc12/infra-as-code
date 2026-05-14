@@ -24,12 +24,12 @@ resources:
   production_server:
     type: OS::Nova::Server
     properties:
-      name: production-server
+      name: doan-production-server
       image: { get_param: image_id }
       flavor: { get_param: flavor }
       key_name: { get_param: key_name }
       networks:
-        - network: { get_param: network_name}
+        - network: { get_param: network_name }
 
 outputs:
   server_ip:
