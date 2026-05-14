@@ -1,0 +1,37 @@
+heat_template_version: 2015-10-15
+
+description: Template to create a production server on Ubuntu 24.04
+
+parameters:
+  key_name:
+    type: string
+    description: Name of key pair
+    default: "doan-key"
+  image_id:
+    type: string
+    description: Name of image
+    default: "ubuntu-24.04"
+  flavor:
+    type: string
+    description: Flavor for the server
+    default: "m1.small"
+  network_name:
+    type: string
+    description: Name of network
+    default: "student-net"
+
+resources:
+  production_server:
+    type: OS::Nova::Server
+    properties:
+      name: production-server
+      image: { get_param: image_id }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - network: { get_param: network_name}
+
+outputs:
+  server_ip:
+    description: IP address of the production server
+    value: { get_attr: [production_server, first_address] }
