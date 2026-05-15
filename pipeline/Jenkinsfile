@@ -1,0 +1,135 @@
+pipeline {
+    agent { label 'doan-vm' }
+    
+    environment {
+        REPO_URL = 'https://github.com/tungbc12/infra-as-code.git'
+        TF_DIR = 'pipeline/terraform'
+        ANSIBLE_DIR = 'pipeline/ansible'
+        PLAYBOOK_FILE = 'setup.yml'
+        KEY_PATH = '/home/jenkins/.ssh/doan-key.pem'
+        PROD_USER = 'ubuntu'
+    }
+    
+    stages {
+        // ========== STAGE 1: BUILD JAVA APP ==========
+        stage('Build Java App') {
+            steps {
+                script {
+                    echo '========== STAGE 1: Building Java Application =========='
+                    
+                    // Clone and build Java code from Git repository
+                    git url: 'https://github.com/tungbc12/JSONParser.git', branch: 'main'
+                    
+                    // Build with Maven
+                    sh 'mvn clean package'
+                    
+                    // Archive artifact for later use
+                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                    
+                    echo 'Java application built successfully!'
+                }
+            }
+        }
+        
+        // ========== STAGE 2: CREATE VM WITH TERRAFORM ==========
+        stage('Create VM with Terraform') {
+            steps {
+                script {
+                    echo '========== STAGE 2: Creating VM with Terraform =========='
+                    
+                    // Generate unique VM name with timestamp
+                    def timestamp = sh(script: "date +'%Y%m%d-%H%M%S'", returnStdout: true).trim()
+                    env.VM_NAME = "doan-pipeline-${timestamp}"
+                    echo "VM Name: ${env.VM_NAME}"
+                    
+                    // Clone infrastructure code from Git
+                    git branch: 'main', url: REPO_URL
+                    
+                    sh """
+                        . /home/ubuntu/student-openrc.sh
+                        cd ${TF_DIR}
+                        terraform init
+                        terraform apply -auto-approve -var='instance_name=${env.VM_NAME}'
+                    """
+                    
+                    // Extract the new VM's IP address from Terraform output
+                    sh """
+                        . /home/ubuntu/student-openrc.sh
+                        cd ${TF_DIR}
+                        terraform output -raw server_ip > /tmp/new_vm_ip.txt
+                    """
+                    
+                    // Read IP into environment variable
+                    env.PROD_SERVER = readFile('/tmp/new_vm_ip.txt').trim()
+                    echo "New VM created at IP: ${env.PROD_SERVER}"
+                    echo "VM Name: ${env.VM_NAME}"
+                }
+            }
+        }
+        
+        // ========== STAGE 3: CONFIGURE WITH ANSIBLE ==========
+        stage('Configure with Ansible') {
+            steps {
+                script {
+                    echo '========== STAGE 3: Configuring VM with Ansible =========='
+                    echo "Target VM IP: ${env.PROD_SERVER}"
+                    
+                    // Create inventory.ini INSIDE 'pipeline/ansible'
+                    writeFile file: 'pipeline/ansible/inventory.ini', text: """
+[production]
+new-vm ansible_host=${env.PROD_SERVER} ansible_user=${PROD_USER} ansible_ssh_private_key_file=${KEY_PATH} ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+"""
+                    
+                    sh """
+                        cd ${ANSIBLE_DIR}
+                        ansible-playbook -i inventory.ini ${PLAYBOOK_FILE}
+                    """
+                    
+                    echo 'Ansible configuration completed successfully!'
+                }
+            }
+        }
+        
+        // ========== STAGE 4: DEPLOY TO NEW VM ==========
+        stage('Deploy to New VM') {
+            steps {
+                script {
+                    echo '========== STAGE 4: Deploying Application to New VM =========='
+                    echo "Deploying to: ${env.PROD_SERVER}"
+                    
+                    // Ensure target directory exists
+                    sh 'mkdir -p target'
+                    
+                    // Copy jar file from workspace (built in Stage 1) to the new VM
+                    sh """
+                        echo "Copying jar file to ${env.PROD_SERVER}..."
+                        scp -o StrictHostKeyChecking=no -i ${KEY_PATH} target/*.jar ${PROD_USER}@${env.PROD_SERVER}:/home/ubuntu/myapp.jar
+                        
+                        echo "Starting application service..."
+                        ssh -o StrictHostKeyChecking=no -i ${KEY_PATH} ${PROD_USER}@${env.PROD_SERVER} 'sudo systemctl start myapp'
+                        
+                        echo "Checking service status..."
+                        ssh -o StrictHostKeyChecking=no -i ${KEY_PATH} ${PROD_USER}@${env.PROD_SERVER} 'sudo systemctl status myapp --no-pager'
+                    """
+                    
+                    echo 'Application deployed successfully!'
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo '========================================'
+            echo 'FULL PIPELINE COMPLETED SUCCESSFULLY!'
+            echo "New VM IP: ${env.PROD_SERVER}"
+            echo "New VM Name: ${env.VM_NAME}"
+            echo '========================================'
+        }
+        failure {
+            echo '========================================'
+            echo 'FULL PIPELINE FAILED!'
+            echo '========================================'
+        }
+    }
+}
