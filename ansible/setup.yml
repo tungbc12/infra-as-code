@@ -5,6 +5,13 @@
   gather_facts: yes
 
   tasks:
+    - name: Replace Ubuntu mirror with Yandex mirror for faster updates
+      replace:
+        path: /etc/apt/sources.list
+        regexp: 'archive.ubuntu.com'
+        replace: 'mirror.yandex.ru'
+      become: yes
+
     - name: Update apt cache
       apt:
         update_cache: yes
