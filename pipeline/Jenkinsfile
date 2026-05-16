@@ -77,22 +77,18 @@ pipeline {
                     // Wait for SSH port 22 to be open
                     sh """
                         echo "Checking SSH connectivity to ${env.PROD_SERVER}..."
-                        timeout 300s bash -c '
+                        timeout 180s bash -c '
                             while ! nc -zv ${env.PROD_SERVER} 22 2>/dev/null; do
                                 echo "Waiting for SSH to be ready..."
-                                sleep 10
+                                sleep 5
                             done
                             echo "SSH is ready!"
                         '
                     """
                     
-                    // Additional wait for cloud-init to complete
-                    sh """
-                        echo "Waiting for cloud-init to complete..."
-                        ssh -o StrictHostKeyChecking=no -i ${KEY_PATH} ${PROD_USER}@${env.PROD_SERVER} \
-                            'while systemctl is-active --quiet cloud-init; do echo "Waiting for cloud-init..."; sleep 5; done' 2>/dev/null || true
-                        echo "VM is fully ready!"
-                    """
+                    // Simple sleep to ensure system is stable (no cloud-init check)
+                    echo "Waiting 30 seconds for system to stabilize..."
+                    sh 'sleep 30'
                     
                     echo 'VM is ready for Ansible configuration!'
                 }
